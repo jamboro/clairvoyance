@@ -10,13 +10,17 @@ from typing import Optional
 
 from clairvoyance import graphql
 
-
 def get_valid_fields(error_message: str) -> Set:
     valid_fields = set()
 
-    multiple_suggestions_re = 'Cannot query field [\'"]([_A-Za-z][_0-9A-Za-z]*)[\'"] on type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"]. Did you mean (?P<multi>([\'"][_A-Za-z][_0-9A-Za-z]*[\'"], )+)(or [\'"](?P<last>[_A-Za-z][_0-9A-Za-z]*)[\'"])?\?'
-    or_suggestion_re = 'Cannot query field [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] on type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"]. Did you mean [\'"](?P<one>[_A-Za-z][_0-9A-Za-z]*)[\'"] or [\'"](?P<two>[_A-Za-z][_0-9A-Za-z]*)[\'"]\?'
-    single_suggestion_re = 'Cannot query field [\'"]([_A-Za-z][_0-9A-Za-z]*)[\'"] on type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"]. Did you mean [\'"](?P<field>[_A-Za-z][_0-9A-Za-z]*)[\'"]\?'
+    suggestion_regexes = \
+        ['(Cannot query field [\'"]([_A-Za-z][_0-9A-Za-z]*)[\'"] on type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"]. Did you mean )',
+        '(Cannot query field [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] on type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"]. Did you mean )',
+        '(Cannot query field [\'"]([_A-Za-z][_0-9A-Za-z]*)[\'"] on type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"]. Did you mean )'
+        '(Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean to use an inline fragment on )'
+        ]
+
+
     invalid_field_re = (
         'Cannot query field [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] on type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"].'
     )
@@ -30,31 +34,26 @@ def get_valid_fields(error_message: str) -> Set:
     if re.fullmatch(no_fields_regex, error_message):
         return valid_fields
 
-    if re.fullmatch(multiple_suggestions_re, error_message):
-        match = re.fullmatch(multiple_suggestions_re, error_message)
+    matched = False
 
-        for m in match.group("multi").split(", "):
-            if m:
-                valid_fields.add(m.strip('"').strip("'"))
+    for regex in suggestion_regexes:
+        match = re.match(regex, error_message)
+        if match:
+            error_parsed = error_message.replace(match.group(), '')
+            error_parsed = error_parsed.replace(' or', ',').replace('"', '').replace('"', '').replace('?', '')
+            splits = [m.strip() for m in error_parsed.split(',')]
+            for m in splits:
+                valid_fields.add(m)
+                matched = True
 
-        if match.group("last"):
-            valid_fields.add(match.group("last"))
-    elif re.fullmatch(or_suggestion_re, error_message):
-        match = re.fullmatch(or_suggestion_re, error_message)
-
-        valid_fields.add(match.group("one"))
-        valid_fields.add(match.group("two"))
-    elif re.fullmatch(single_suggestion_re, error_message):
-        match = re.fullmatch(single_suggestion_re, error_message)
-
-        valid_fields.add(match.group("field"))
-    elif re.fullmatch(invalid_field_re, error_message):
-        pass
-    elif re.fullmatch(valid_field_regexes[0], error_message):
-        match = re.fullmatch(valid_field_regexes[0], error_message)
-        valid_fields.add(match.group("field"))
-    else:
-        logging.warning(f"Unknown error message: '{error_message}'")
+    if not matched:
+        if re.fullmatch(invalid_field_re, error_message):
+            pass
+        elif re.fullmatch(valid_field_regexes[0], error_message):
+            match = re.fullmatch(valid_field_regexes[0], error_message)
+            valid_fields.add(match.group("field"))
+        else:
+            logging.warning(f"Unknown error message: '{error_message}'")
 
     return valid_fields
 
@@ -173,12 +172,10 @@ def get_valid_args(error_message: str) -> Set[str]:
         'Unknown argument [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] on field [\'"][_A-Za-z][_0-9A-Za-z.]*[\'"]\.',
     ]
 
-    single_suggestion_regexes = [
-        'Unknown argument [\'"][_0-9a-zA-Z\[\]!]*[\'"] on field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean [\'"](?P<arg>[_0-9a-zA-Z\[\]!]*)[\'"]\?'
-    ]
-
-    double_suggestion_regexes = [
-        'Unknown argument [\'"][_0-9a-zA-Z\[\]!]*[\'"] on field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"][_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean [\'"](?P<first>[_0-9a-zA-Z\[\]!]*)[\'"] or [\'"](?P<second>[_0-9a-zA-Z\[\]!]*)[\'"]\?'
+    suggestion_regexes = [
+        '(Unknown argument [\'"][_0-9a-zA-Z\[\]!]*[\'"] on field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean )',
+        '(Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean )'
+        '(Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean to use an inline fragment on )'
     ]
 
 
@@ -186,16 +183,14 @@ def get_valid_args(error_message: str) -> Set[str]:
         if re.fullmatch(regex, error_message):
             return set()
 
-    for regex in single_suggestion_regexes:
-        if re.fullmatch(regex, error_message):
-            match = re.fullmatch(regex, error_message)
-            valid_args.add(match.group("arg"))
-
-    for regex in double_suggestion_regexes:
-        match = re.fullmatch(regex, error_message)
+    for regex in suggestion_regexes:
+        match = re.match(regex, error_message)
         if match:
-            valid_args.add(match.group("first"))
-            valid_args.add(match.group("second"))
+            error_parsed = error_message.replace(match.group(), '')
+            error_parsed = error_parsed.replace(' or', ',').replace('"', '').replace('"', '').replace('?', '')
+            splits = [m.strip() for m in error_parsed.split(',')]
+            for m in splits:
+                valid_args.add(m)
 
     if not valid_args:
         logging.warning(f"Unknown error message: {error_message}")
@@ -261,7 +256,8 @@ def get_typeref(error_message: str, context: str) -> Optional[graphql.TypeRef]:
     ]
     arg_regexes = [
         'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] argument [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] is required.+\.',
-        "Expected type (?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*), found .+\."
+        "Expected type (?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*), found .+\.",
+        'Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean [\'"](?P<typeref>[_0-9a-zA-Z\[\]!]*)[\'"]\?'
     ]
     arg_skip_regexes = [
         'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"][_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*[\'"] must have a selection of subfields\. Did you mean [\'"][_0-9a-zA-Z\[\]!]* \{ \.\.\. \}[\'"]\?'
@@ -381,6 +377,7 @@ def probe_typename(input_document: str, config: graphql.Config) -> str:
     wrong_field_regexes = [
         f'Cannot query field [\'"]{wrong_field}[\'"] on type [\'"](?P<typename>[_0-9a-zA-Z\[\]!]*)[\'"].',
         f'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] must not have a selection since type [\'"](?P<typename>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] has no subfields.',
+        f'Cannot query field [\'"]{wrong_field}[\'"] on type [\'"](?P<typename>[_0-9a-zA-Z\[\]!]*)[\'"]. Did you mean [\'"][_0-9a-zA-Z\[\]!]*[\'"]?'
     ]
 
     match = None
