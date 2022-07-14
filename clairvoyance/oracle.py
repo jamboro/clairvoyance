@@ -26,7 +26,7 @@ def get_valid_fields(error_message: str) -> Set:
     )
     # TODO: this regex here more than one time, make it shared?
     valid_field_regexes = [
-        'Field [\'"](?P<field>[_A-Za-z][_0-9A-Za-z]*)[\'"] of type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] must have a selection of subfields. Did you mean [\'"][_A-Za-z][_0-9A-Za-z]* \{ ... \}[\'"]\?',
+        'Field [\'"](?P<field>[_A-Za-z][_0-9A-Za-z]*)[\'"] of type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] must have a selection of subfields\. Did you mean [\'"][_A-Za-z][_0-9A-Za-z]* \{ ... \}[\'"]\?',
     ]
 
     no_fields_regex = 'Field [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] must not have a selection since type [\'"][0-9a-zA-Z\[\]!]+[\'"] has no subfields.'
@@ -40,7 +40,7 @@ def get_valid_fields(error_message: str) -> Set:
         match = re.match(regex, error_message)
         if match:
             error_parsed = error_message.replace(match.group(), '')
-            error_parsed = error_parsed.replace(' or', ',').replace('"', '').replace('"', '').replace('?', '')
+            error_parsed = error_parsed.replace(' or', ',').replace('"', '').replace('"', '').replace('?', '').replace(',,',',')
             splits = [m.strip() for m in error_parsed.split(',')]
             for m in splits:
                 valid_fields.add(m)
@@ -187,13 +187,13 @@ def get_valid_args(error_message: str) -> Set[str]:
         match = re.match(regex, error_message)
         if match:
             error_parsed = error_message.replace(match.group(), '')
-            error_parsed = error_parsed.replace(' or', ',').replace('"', '').replace('"', '').replace('?', '')
+            error_parsed = error_parsed.replace(' or', ',').replace('"', '').replace('"', '').replace('?', '').replace(',,',',')
             splits = [m.strip() for m in error_parsed.split(',')]
             for m in splits:
                 valid_args.add(m)
 
     if not valid_args:
-        logging.warning(f"Unknown error message: {error_message}")
+        logging.warning(f"Unknown error message: '{error_message}'")
 
     return valid_args
 
@@ -251,7 +251,7 @@ def get_typeref(error_message: str, context: str) -> Optional[graphql.TypeRef]:
     field_regexes = [
         'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] must have a selection of subfields. Did you mean [\'"][_0-9a-zA-Z\[\]!]* \{ ... \}[\'"]\?',
         'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] must not have a selection since type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] has no subfields.',
-        'Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"].',
+        'Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"]\.',
         'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] must not have a sub selection\.',
     ]
     arg_regexes = [
@@ -260,7 +260,7 @@ def get_typeref(error_message: str, context: str) -> Optional[graphql.TypeRef]:
         'Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean [\'"](?P<typeref>[_0-9a-zA-Z\[\]!]*)[\'"]\?'
     ]
     arg_skip_regexes = [
-        'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"][_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*[\'"] must have a selection of subfields\. Did you mean [\'"][_0-9a-zA-Z\[\]!]* \{ \.\.\. \}[\'"]\?'
+        'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"][_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*[\'"] must have a selection of subfields\. Did you mean [\'"][_0-9a-zA-Z\[\]!]* \{ \.\.\. \}[\'"]\?''
     ]
 
     match = None
@@ -375,9 +375,9 @@ def probe_typename(input_document: str, config: graphql.Config) -> str:
     errors = response.json()["errors"]
 
     wrong_field_regexes = [
-        f'Cannot query field [\'"]{wrong_field}[\'"] on type [\'"](?P<typename>[_0-9a-zA-Z\[\]!]*)[\'"].',
+        f'Cannot query field [\'"]{wrong_field}[\'"] on type [\'"](?P<typename>[_0-9a-zA-Z\[\]!]*)[\'"]\.',
         f'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] must not have a selection since type [\'"](?P<typename>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] has no subfields.',
-        f'Cannot query field [\'"]{wrong_field}[\'"] on type [\'"](?P<typename>[_0-9a-zA-Z\[\]!]*)[\'"]. Did you mean [\'"][_0-9a-zA-Z\[\]!]*[\'"]?'
+        f'Cannot query field [\'"]{wrong_field}[\'"] on type [\'"](?P<typename>[_0-9a-zA-Z\[\]!]*)[\'"]. Did you mean [\'"][_0-9a-zA-Z\[\]!]*[\'"]\?'
     ]
 
     match = None
