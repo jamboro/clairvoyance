@@ -7,55 +7,92 @@ from typing import Set
 from typing import List
 from typing import Dict
 from typing import Optional
-
+from enum import Enum
 from clairvoyance import graphql
 
-def get_valid_fields(error_message: str) -> Set:
-    valid_fields = set()
-
-    suggestion_regexes = \
-        ['(Cannot query field [\'"]([_A-Za-z][_0-9A-Za-z]*)[\'"] on type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"]. Did you mean )',
-        '(Cannot query field [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] on type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"]. Did you mean )',
-        '(Cannot query field [\'"]([_A-Za-z][_0-9A-Za-z]*)[\'"] on type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"]. Did you mean )'
-        '(Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean to use an inline fragment on )'
-        ]
+class object_enum(Enum):
+    QUERY = 0
+    FIELD = 1,
+    TYPE = 2,
+    ARG = 3,
+    INPUT_FIELD = 4
 
 
-    invalid_field_re = (
-        'Cannot query field [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] on type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"].'
-    )
-    # TODO: this regex here more than one time, make it shared?
-    valid_field_regexes = [
-        'Field [\'"](?P<field>[_A-Za-z][_0-9A-Za-z]*)[\'"] of type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] must have a selection of subfields. Did you mean [\'"][_A-Za-z][_0-9A-Za-z]* \{ ... \}[\'"]\?',
+def parse_errors(error_message:str):
+    generic_match_regex = r'[\'"]?[_A-Za-z\[\]!]+[_0-9a-zA-Z\[\]!]*[\'"]'
+    error_message = error_message.upper()
+
+    suggestions_txt_replace = [fr'DID YOU MEAN TO USE AN INLINE FRAGMENT ON '
+                         fr'DID YOU MEAN ']
+
+    field_regex = [fr'ON FIELD {generic_match_regex}',
+                   fr'FIELD {generic_match_regex}',
+                   fr'REQUIRES BOTH {generic_match_regex} AND {generic_match_regex}'
+                   ]
+
+    types_regex = [fr'ON TYPE {generic_match_regex}',
+                   fr'OF TYPE {generic_match_regex}',
+                   fr'EXPECTED TYPE {generic_match_regex}',
+                   fr"OF REQUIRED TYPE {generic_match_regex} WAS NOT PROVIDED."]
+
+    argument_re = [
+        fr'ARGUMENT {generic_match_regex}'
     ]
 
-    no_fields_regex = 'Field [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] must not have a selection since type [\'"][0-9a-zA-Z\[\]!]+[\'"] has no subfields.'
+    object_dict = {}
 
+    #parse suggestions
+    if 'DID YOU MEAN' in error_message:
+        error_parsed = error_message[error_message.index('DID YOU MEAN')+len('DID YOU MEAN'):]
+        suggestion_match = re.match(generic_match_regex,error_parsed)
+        # all suggestions...
+    elif 'REQUIRES BOTH' in error_message:
+        error_parsed = error_message[error_message.index('REQUIRES BOTH')+len('REQUIRES BOTH'):]
+        suggestion_match = re.match(generic_match_regex,error_parsed)
+
+    # parse field
+    if 'FIELD' in error_message:
+        negative=False
+        if 'CANNOT QUERY FIELD' in error_message:
+            negative=True
+        for f in field_regex:
+            field_match = re.match(f,error_message)
+
+    # parse types
+    if 'ON TYPE' in error_message or ('OF TYPE' in error_message) or 'SINCE TYPE' in error_message or ('OF REQUIRED TYPE' in error_message):
+        for t in types_regex:
+            type_match = re.match(t, error_message)
+
+    if 'ARGUMENT' in error_message:
+        negative = False
+        if 'UNKNOWN ARGUMENT' in error_message:
+            negative = True
+        for a in argument_re:
+            argment_match = re.match(a,error_message)
+
+
+    matched_objects = []
     if re.fullmatch(no_fields_regex, error_message):
-        return valid_fields
-
-    matched = False
+        return []
 
     for regex in suggestion_regexes:
         match = re.match(regex, error_message)
         if match:
             error_parsed = error_message.replace(match.group(), '')
-            error_parsed = error_parsed.replace(' or', ',').replace('"', '').replace('"', '').replace('?', '')
+            error_parsed = error_parsed.replace(' or', ',').replace('"', '').replace('"', '').replace('?', '').replace(
+                ',,', ',')
             splits = [m.strip() for m in error_parsed.split(',')]
             for m in splits:
-                valid_fields.add(m)
+                matched_objects.append(m)
                 matched = True
+            break
 
-    if not matched:
-        if re.fullmatch(invalid_field_re, error_message):
-            pass
-        elif re.fullmatch(valid_field_regexes[0], error_message):
-            match = re.fullmatch(valid_field_regexes[0], error_message)
-            valid_fields.add(match.group("field"))
-        else:
-            logging.warning(f"Unknown error message: '{error_message}'")
+    elif context == "InputValue":
+        for regex in arg_skip_regexes:
+            if re.fullmatch(regex, error_message):
+                return None
 
-    return valid_fields
+
 
 
 def probe_valid_fields(
@@ -99,7 +136,7 @@ def probe_valid_fields(
                 valid_fields.discard(match.group("invalid_field"))
 
             # Second obtain field suggestions from error message
-            valid_fields |= get_valid_fields(error_message)
+            valid_fields |= parse_errors(object_enum.FIELD,error_message)
 
     return valid_fields
 
@@ -145,7 +182,9 @@ def probe_valid_args(
             continue
 
         # Second obtain args suggestions from error message
-        valid_args |= get_valid_args(error_message)
+        valid_args |= parse_errors(object_enum.ARG,error_message)
+        if not valid_args:
+            logging.warning(f"Unknown error message: {error_message}")
 
     return valid_args
 
@@ -161,56 +200,6 @@ def probe_args(
 
     return valid_args
 
-
-def get_valid_args(error_message: str) -> Set[str]:
-    valid_args = set()
-
-    skip_regexes = [
-        'Unknown argument [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] on field [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] of type [\'"][_A-Za-z][_0-9A-Za-z]*[\'"].',
-        'Field [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] of type [\'"][_A-Za-z\[\]!][a-zA-Z\[\]!]*[\'"] must have a selection of subfields. Did you mean [\'"][_A-Za-z][_0-9A-Za-z]* \{ ... \}[\'"]\?',
-        'Field [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] argument [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] of type [\'"][_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*[\'"] is required, but it was not provided.',
-        'Unknown argument [\'"][_A-Za-z][_0-9A-Za-z]*[\'"] on field [\'"][_A-Za-z][_0-9A-Za-z.]*[\'"]\.',
-    ]
-
-    suggestion_regexes = [
-        '(Unknown argument [\'"][_0-9a-zA-Z\[\]!]*[\'"] on field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean )',
-        '(Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean )'
-        '(Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean to use an inline fragment on )'
-    ]
-
-
-    for regex in skip_regexes:
-        if re.fullmatch(regex, error_message):
-            return set()
-
-    for regex in suggestion_regexes:
-        match = re.match(regex, error_message)
-        if match:
-            error_parsed = error_message.replace(match.group(), '')
-            error_parsed = error_parsed.replace(' or', ',').replace('"', '').replace('"', '').replace('?', '')
-            splits = [m.strip() for m in error_parsed.split(',')]
-            for m in splits:
-                valid_args.add(m)
-
-    if not valid_args:
-        logging.warning(f"Unknown error message: {error_message}")
-
-    return valid_args
-
-
-def get_valid_input_fields(error_message: str) -> Set:
-    valid_fields = set()
-
-    single_suggestion_re = "Field [_0-9a-zA-Z\[\]!]*.(?P<field>[_0-9a-zA-Z\[\]!]*) of required type [_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]* was not provided."
-
-    if re.fullmatch(single_suggestion_re, error_message):
-        match = re.fullmatch(single_suggestion_re, error_message)
-        if match.group("field"):
-            valid_fields.add(match.group("field"))
-        else:
-            logging.warning(f"Unknown error message: '{error_message}'")
-
-    return valid_fields
 
 
 def probe_input_fields(
@@ -240,7 +229,7 @@ def probe_input_fields(
             valid_input_fields.discard(match.group("invalid_field"))
 
         # Second obtain field suggestions from error message
-        valid_input_fields |= get_valid_input_fields(error_message)
+        valid_input_fields |= parse_errors(object_enum.INPUT_FIELD,error_message)
 
     return valid_input_fields
 
@@ -248,49 +237,21 @@ def probe_input_fields(
 def get_typeref(error_message: str, context: str) -> Optional[graphql.TypeRef]:
     typeref = None
 
-    field_regexes = [
-        'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] must have a selection of subfields. Did you mean [\'"][_0-9a-zA-Z\[\]!]* \{ ... \}[\'"]\?',
-        'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] must not have a selection since type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] has no subfields.',
-        'Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"].',
-        'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] must not have a sub selection\.',
-    ]
-    arg_regexes = [
-        'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] argument [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"](?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] is required.+\.',
-        "Expected type (?P<typeref>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*), found .+\.",
-        'Cannot query field [\'"][_0-9a-zA-Z\[\]!]*[\'"] on type [\'"][_0-9a-zA-Z\[\]!]*[\'"]. Did you mean [\'"](?P<typeref>[_0-9a-zA-Z\[\]!]*)[\'"]\?'
-    ]
-    arg_skip_regexes = [
-        'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] of type [\'"][_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*[\'"] must have a selection of subfields\. Did you mean [\'"][_0-9a-zA-Z\[\]!]* \{ \.\.\. \}[\'"]\?'
-    ]
+    matches = parse_errors(object_enum.TYPE,error_message)
 
-    match = None
-
-    if context == "Field":
-        for regex in field_regexes:
-            if re.fullmatch(regex, error_message):
-                match = re.fullmatch(regex, error_message)
-                break
-    elif context == "InputValue":
-        for regex in arg_skip_regexes:
-            if re.fullmatch(regex, error_message):
-                return None
-
-        for regex in arg_regexes:
-            if re.fullmatch(regex, error_message):
-                match = re.fullmatch(regex, error_message)
-                break
-
-    if match:
-        tk = match.group("typeref")
+    # we only get 1 typeRef at a time?
+    if any(matches):
+        tk = matches[0]
 
         name = tk.replace("!", "").replace("[", "").replace("]", "")
-        kind = ""
+
         if name.endswith("Input"):
             kind = "INPUT_OBJECT"
         elif name in ["Int", "Float", "String", "Boolean", "ID"]:
             kind = "SCALAR"
         else:
             kind = "OBJECT"
+
         is_list = True if "[" and "]" in tk else False
         non_null_item = True if is_list and "!]" in tk else False
         non_null = True if tk.endswith("!") else False
@@ -302,8 +263,6 @@ def get_typeref(error_message: str, context: str) -> Optional[graphql.TypeRef]:
             non_null_item=non_null_item,
             non_null=non_null,
         )
-    else:
-        logging.warning(f"Unknown error message: '{error_message}'")
 
     return typeref
 
@@ -377,7 +336,7 @@ def probe_typename(input_document: str, config: graphql.Config) -> str:
     wrong_field_regexes = [
         f'Cannot query field [\'"]{wrong_field}[\'"] on type [\'"](?P<typename>[_0-9a-zA-Z\[\]!]*)[\'"].',
         f'Field [\'"][_0-9a-zA-Z\[\]!]*[\'"] must not have a selection since type [\'"](?P<typename>[_A-Za-z\[\]!][_0-9a-zA-Z\[\]!]*)[\'"] has no subfields.',
-        f'Cannot query field [\'"]{wrong_field}[\'"] on type [\'"](?P<typename>[_0-9a-zA-Z\[\]!]*)[\'"]. Did you mean [\'"][_0-9a-zA-Z\[\]!]*[\'"]?'
+        f'Cannot query field [\'"]{wrong_field}[\'"] on type [\'"](?P<typename>[_0-9a-zA-Z\[\]!]*)[\'"]. Did you mean [\'"][_0-9a-zA-Z\[\]!]*[\'"]\?'
     ]
 
     match = None
